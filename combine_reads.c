@@ -427,6 +427,103 @@ generate_combined_read(const struct read *read_1,
 	}
 }
 
+/* Fills in the combined read from the overlap of specified alignment.  */
+static void
+generate_overlap_read(const struct read *read_1,
+		      const struct read *read_2,
+		      struct read *combined_read,
+		      int overlap_begin,
+		      bool cap_mismatch_quals)
+{
+	/* Length of the overlapping part of two reads.  */
+	int overlap_len = read_1->seq_len - overlap_begin;
+
+	const char * restrict seq_1 = read_1->seq;
+	const char * restrict seq_2 = read_2->seq;
+	const char * restrict qual_1 = read_1->qual;
+	const char * restrict qual_2 = read_2->qual;
+	char * restrict combined_seq;
+	char * restrict combined_qual;
+
+	if (combined_read->seq_bufsz < overlap_len) {
+		combined_read->seq = xrealloc(combined_read->seq,
+					      overlap_len);
+		combined_read->seq_bufsz = overlap_len;
+	}
+	if (combined_read->qual_bufsz < overlap_len) {
+		combined_read->qual = xrealloc(combined_read->qual,
+					       overlap_len);
+		combined_read->qual_bufsz = overlap_len;
+	}
+
+	combined_seq = combined_read->seq;
+	combined_qual = combined_read->qual;
+
+	combined_read->seq_len = overlap_len;
+	combined_read->qual_len = overlap_len;
+
+        seq_1 += overlap_begin;
+        qual_1 += overlap_begin;
+
+	/* Copy the overlapped region.  */
+	while (overlap_len--) {
+		if (*seq_1 == *seq_2) {
+			/* Same base in both reads.  Take the higher quality
+			 * value. */
+			*combined_seq = *seq_1;
+			*combined_qual = max(*qual_1, *qual_2);
+		} else {
+			/* Different bases in the two reads; use the higher
+			 * quality one.
+			 *
+			 * The old way of calculating the resulting quality
+			 * value (params->cap_mismatch_quals == %true) is to use
+			 * the lower quality value, and use a quality value of
+			 * at most 2 (+ phred_offset in the final output--- here
+			 * the quality values are all scaled to start at 0).
+			 * The motivation for this behavior is that the read
+			 * combination shows there was sequencing error at the
+			 * mismatch location, so the corresponding base call in
+			 * the combined read should be given a low quality
+			 * score.
+			 *
+			 * The new way (params->cap_mismatch_quals == %false,
+			 * default as of FLASH v1.2.8) is to use the absolute
+			 * value of the difference in quality scores, but at
+			 * least 2.  This allows a base call with a high quality
+			 * score to override a base call with a low quality
+			 * score without too much penalty.
+			 */
+
+			if (cap_mismatch_quals)
+				*combined_qual = min(min(*qual_1, *qual_2), 2);
+			else
+				*combined_qual = max(abs(*qual_1 - *qual_2), 2);
+
+			if (*qual_1 > *qual_2) {
+				*combined_seq = *seq_1;
+			} else if (*qual_1 < *qual_2) {
+				*combined_seq = *seq_2;
+			} else {
+				/* Same quality value; take the base from the
+				 * first read if the base from the second read
+				 * is an 'N'; otherwise take the base from the
+				 * second read. */
+				if (*seq_2 == 'N')
+					*combined_seq = *seq_1;
+				else
+					*combined_seq = *seq_2;
+			}
+		}
+		combined_seq++;
+		combined_qual++;
+		seq_1++;
+		seq_2++;
+		qual_1++;
+		qual_2++;
+	}
+}
+
 /* This is the entry point for the core algorithm of FLASH.  The following
  * function attempts to combine @read_1 with @read_2, and writes the result into
  * @combined_read.  COMBINED_AS_INNIE or COMBINED_AS_OUTIE is returned if
@@ -519,7 +616,12 @@ combine_reads(const struct read *read_1, const struct read *read_2,
 	}
 
 	/* Fill in the combined read.  */
-	generate_combined_read(read_1, read_2, combined_read,
-			       overlap_begin, params->cap_mismatch_quals);
+        if (was_outie && params->trim_outies) {
+            generate_overlap_read(read_1, read_2, combined_read,
+                                overlap_begin, params->cap_mismatch_quals);
+        } else {
+            generate_combined_read(read_1, read_2, combined_read,
+                                overlap_begin, params->cap_mismatch_quals);
+        }
 	return status;
 }

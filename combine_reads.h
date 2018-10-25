@@ -22,6 +22,9 @@ struct combine_params {
 
 	/* --allow-outies  */
 	bool allow_outies;
+
+	/* --trim-outies  */
+	bool trim_outies;
 };
 
 /* Result of a call to combine_reads()  */

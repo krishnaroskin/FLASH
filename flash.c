@@ -44,7 +44,7 @@
 #include "read_queue.h"
 #include "util.h"
 
-#define VERSION_STR "v1.2.11"
+#define VERSION_STR "v1.3.0"
 
 #ifdef __WIN32__
 #  define PAGER "more"
@@ -183,6 +183,13 @@ usage(const char *argv0)
 "\n"
 "                          This option also causes extra .innie and .outie\n"
 "                          histogram files to be produced.\n"
+"\n"
+"  -U, --trim-outies       Trim the over hanging ends off from an \"outie\"\n"
+"                          combined read, e.g.\n"
+"\n"
+"                               Read 1: <-----------\n"
+"                               Read 2:       ------------>\n"
+"                            Combined :       ------\n"
 "\n"
 "  -p, --phred-offset=OFFSET\n"
 "                          The smallest ASCII value of the characters used to\n"
@@ -352,13 +359,14 @@ enum {
 	TAB_DELIMITED_OUTPUT_OPTION,
 };
 
-static const char *optstring = "m:M:x:p:Or:f:s:IT:o:d:czt:qhv";
+static const char *optstring = "m:M:x:p:OUr:f:s:IT:o:d:czt:qhv";
 static const struct option longopts[] = {
 	{"min-overlap",          required_argument,  NULL, 'm'},
 	{"max-overlap",          required_argument,  NULL, 'M'},
 	{"max-mismatch-density", required_argument,  NULL, 'x'},
 	{"phred-offset",         required_argument,  NULL, 'p'},
 	{"allow-outies",         no_argument,        NULL, 'O'},
+	{"trim-outies",          no_argument,        NULL, 'U'},
 	{"read-len",             required_argument,  NULL, 'r'},
 	{"fragment-len",         required_argument,  NULL, 'f'},
 	{"fragment-len-stddev",  required_argument,  NULL, 's'},
@@ -832,6 +840,7 @@ main(int argc, char **argv)
 		.max_mismatch_density = 0.25,
 		.cap_mismatch_quals = false,
 		.allow_outies = false,
+		.trim_outies = false,
 	};
 	bool max_overlap_specified = false;
 	struct read_format_params iparams = {
@@ -921,6 +930,9 @@ main(int argc, char **argv)
 			break;
 		case 'O':
 			alg_params.allow_outies = true;
+			break;
+		case 'U':
+			alg_params.trim_outies = true;
 			break;
 		case 'f':
 			fragment_len = strtol(optarg, &tmp, 10);
@@ -1098,6 +1110,10 @@ main(int argc, char **argv)
 	#endif
 	}
 
+        if (alg_params.allow_outies == false && alg_params.trim_outies) {
+                warning("\"Outies\" being trimmed (-U) but are not allowed (-O not set)");
+        }
+
 	if (alg_params.max_overlap < alg_params.min_overlap) {
 		fatal_error(
 "Maximum overlap (%d) cannot be less than the minimum overlap (%d).\n"
@@ -1216,6 +1232,8 @@ main(int argc, char **argv)
 		     alg_params.max_mismatch_density);
 		info("    Allow \"outie\" pairs:   %s",
 		     alg_params.allow_outies ? "true" : "false");
+		info("    Trim \"outie\" merges:   %s",
+		     alg_params.trim_outies ? "true" : "false");
 		info("    Cap mismatch quals:    %s",
 		     alg_params.cap_mismatch_quals ? "true" : "false");
 		info("    Combiner threads:      %u",
